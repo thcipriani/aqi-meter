@@ -7,3 +7,9 @@
 [submodule "lib/Adafruit_BusIO"]
 	path = lib/Adafruit_BusIO
 	url = https://github.com/adafruit/Adafruit_BusIO.git
+[submodule "lib/Adafruit_BME280"]
+	path = lib/Adafruit_BME280
+	url = https://github.com/adafruit/Adafruit_BME280_Library.git
+[submodule "lib/Adafruit_Sensor"]
+	path = lib/Adafruit_Sensor
+	url = https://github.com/adafruit/Adafruit_Sensor.git
