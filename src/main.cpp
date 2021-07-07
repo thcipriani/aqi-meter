@@ -1,11 +1,34 @@
+/**
+ * AQI Meter
+ * =========
+ * Copyright 2021 Tyler Cipriani <tyler@tylercipriani.com>
+ * License: GPLv3
+ * 
+ * Much of this is work is from:
+ *   - BSD License: <https://github.com/SuperHouse/AQS>
+ */
+#define PROJECT "nodemcu-aqi"
+#define VERSION "0.0.1"
+
+/**
+ * Only thing in "secrets.h":
+ *   - ssid
+ *   - password
+ *   - mqttBroker
+ */
+#include "secrets.h"
+
 #include <Arduino.h>
 #include <Wire.h>
+#include <SoftwareSerial.h>
 #include <Adafruit_I2CDevice.h> //Included to make GFX lib happy
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_BME280.h>
+#include "PMS.h"
 
-/* -------------------- WiFi Config ----------------- */
-
+// Stolen from: <https://steve.fi/hardware/d1-pub-sub/>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
 
 /* -------------------- Hardware Config ----------------- */
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -15,11 +38,23 @@
 #define SCREEN_ADDRESS 0x3C
 #define BME_ADDRESS    0x76
 
+#define PMS_RX_PIN  D7
+#define PMS_TX_PIN  D8
+#define PMS_BAUD  9600
+
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_BME280 bme;
 Adafruit_Sensor *bme_temp = bme.getTemperatureSensor();
 Adafruit_Sensor *bme_pressure = bme.getPressureSensor();
 Adafruit_Sensor *bme_humidity = bme.getHumiditySensor();
+
+SoftwareSerial pmsSerial(PMS_RX_PIN, PMS_TX_PIN);
+PMS pms(pmsSerial);
+PMS::DATA pmsData;
+
+/* -------------------- WiFi Config ----------------- */
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 /**
  * Setup display
@@ -90,21 +125,58 @@ String makeBMEOutput(
   return allStr;
 }
 
+bool mqttConnected() {
+  while (! client.connected()) {
+
+  }
+}
+
+void setupWifi() {
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  // Set the hostname
+  WiFi.hostname(PROJECT);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+}
+
 void setup() {
   Serial.begin(115200);
+  Serial.println();
+  Serial.print("Air Quality Sensor starting up, v");
+  Serial.println(VERSION);
 
+  pmsSerial.begin(PMS_BAUD);
+  pms.passiveMode();
+  delay(100);
   setupDisplay();
-
   setupBME();
+  setupWifi();
+  setupMQTT()
 }
 
 void loop() {
   sensors_event_t temp_event, pressure_event, humidity_event;
+  int loopCount = 0;
   bme_temp->getEvent(&temp_event);
   bme_pressure->getEvent(&pressure_event);
   bme_humidity->getEvent(&humidity_event);
 
+  if (loopCount % 10000 == 0) {
+    pms.wakeUp();
+    pms.readUntil(pmsData);
+    pms.sleep();
+  }
+
+  Serial.println(pmsData.PM_AE_UG_2_5);
   render(makeBMEOutput(temp_event, pressure_event, humidity_event));
-  
+ 
   delay(1000);
 }
