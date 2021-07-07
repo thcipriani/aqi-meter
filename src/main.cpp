@@ -126,8 +126,32 @@ String makeBMEOutput(
 }
 
 bool mqttConnected() {
-  while (! client.connected()) {
+  Serial.print("Attempting MQTT connection...");
 
+  char mqttClientId[20];
+  sprintf(mqttClientId, "esp8266-%x", ESP.getChipId());
+
+  // Loop until we're reconnected
+  while (!client.connected()) {
+      if (client.connect(mqttClientId, mqttUsername, mqttPassword)) {
+        Serial.println("connected.");
+
+        // Once connected, publish an announcement
+        client.publish("meta", "We're connected");
+      } else {
+        Serial.print("failed, rc=");
+        Serial.print(client.state());
+        Serial.println(" try again in 5 seconds");
+        // Wait 5 seconds before retrying
+        delay(5000);
+      }
+  }
+}
+
+void setupMQTT() {
+  client.setServer(mqttBroker, 1883);
+  if (mqttConnected()) {
+    return;
   }
 }
 
@@ -159,7 +183,7 @@ void setup() {
   setupDisplay();
   setupBME();
   setupWifi();
-  setupMQTT()
+  setupMQTT();
 }
 
 void loop() {
