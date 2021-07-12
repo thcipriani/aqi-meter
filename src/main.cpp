@@ -3,11 +3,11 @@
  * =========
  * Copyright 2021 Tyler Cipriani <tyler@tylercipriani.com>
  * License: GPLv3
- * 
+ *
  * Much of this is work is from:
  *   - BSD License: <https://github.com/SuperHouse/AQS>
  */
-#define PROJECT "Tyler's Neat AQI Thing"
+#define PROJECT "Tyler's AQI Thingy"
 #define VERSION "0.0.1"
 
 #include <Arduino.h>
@@ -42,25 +42,6 @@
  */
 #include "secrets.h"
 
-const char *mqttJsonFmtString = R"JSON(
-      {
-        "PMS5003": {
-          "CF1": %i,
-          "CF2.5": %i,
-          "CF10": %i,
-          "PM1": %i,
-          "PM2.5": %i,
-          "PM10": %i,
-          "PB0.3": %i,
-          "PB0.5": %i,
-          "PB1": %i,
-          "PB2.5": %i,
-          "PB5": %i,
-          "PB10": %i
-        }
-      }",
-)JSON";
-
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_BME280 bme;
 Adafruit_Sensor *bmeTemp = bme.getTemperatureSensor();
@@ -82,6 +63,9 @@ uint64_t pmsTimeLastRead = 0;
 uint64_t pmsWarmupTime = 30;      // seconds for warmup
 uint64_t pmsReportInterval = 120; // seconds between PMS Reads
 bool pmsReadingTaken = false;
+
+uint64_t mqttReportInterval = 120;
+uint64_t mqttTimeLastReport = 0;
 
 void connectMQTT() {
   Serial.print("Attempting MQTT connection...");
@@ -131,7 +115,7 @@ void setupWifi() {
 
 /**
  * Setup display
- * 
+ *
  * Used by the setup loop to initialize the SSD1306 OLED display
  */
 void setupDisplay() {
@@ -147,17 +131,17 @@ void setupDisplay() {
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
-  display.print(" ");
   display.print(PROJECT);
-  display.print(" ");
+  display.print("\nv: ");
   display.println(VERSION);
+  display.println("Connecting...");
   display.display();
   Serial.println(F("DONE!"));
 }
 
 /**
  * Used in setup loop to initialize BME280
- * 
+ *
  * Temp/pressure/humidity sensor
  */
 void setupBME() {
@@ -193,11 +177,53 @@ void updateMQTT(
   sensors_event_t humidityEvent,
   PMS::DATA pmsSensorData
   ) {
-    char mqttMessageBuffer[255];
-    char mqttTopic[50];
+    if (! pmsReadingTaken) {
+      return;
+    }
+    uint64_t timeNow = millis();
+    if (timeNow - mqttTimeLastReport < mqttReportInterval * 1000) {
+      return;
+    }
+    mqttTimeLastReport = timeNow;
 
-    sprintf(mqttTopic, "esp8266/%x/SENSOR", ESP.getChipId());
-    sprintf(mqttMessageBuffer, mqttJsonFmtString,
+    char mqttBMEMessageBuffer[255];
+    char mqttBMETopic[50];
+    sprintf(mqttBMETopic, "esp8266/%x/BME", ESP.getChipId());
+    sprintf(
+      mqttBMEMessageBuffer,
+      R"BME({
+        "Temp": %02.02f,
+        "humidity": %02.02f,
+        "hPa": %02.02f
+      })BME",
+      cToF(tempEvent.temperature),           // Temp in F
+      humidityEvent.relative_humidity,
+      pressureEvent.pressure
+    );
+    
+    Serial.print("MQTT BME message: ");
+    Serial.println(mqttBMEMessageBuffer);
+    client.publish(mqttBMETopic, mqttBMEMessageBuffer);
+
+    char mqttPMSTopic[50];
+    char mqttPMSMessageBuffer[255];
+    sprintf(mqttPMSTopic, "esp8266/%x/PMS5003", ESP.getChipId());
+
+    sprintf(
+      mqttPMSMessageBuffer,
+      R"PMS({
+        "CF1": %i,
+        "CF2.5": %i,
+        "CF10": %i,
+        "PM1": %i,
+        "PM2.5": %i,
+        "PM10": %i,
+        "PB0_3": %i,
+        "PB0_5": %i,
+        "PB1_0": %i,
+        "PB2_5": %i
+      })PMS",
+      pmsSensorData.PM_SP_UG_1_0,            // Standard Particle calibration pm1.0 reading
       pmsSensorData.PM_SP_UG_2_5,            // Standard Particle calibration pm2.5 reading
       pmsSensorData.PM_SP_UG_10_0,           // Standard Particle calibration pm10 reading
       pmsSensorData.PM_AE_UG_1_0,            // Atmospheric Environment pm1.0 reading
@@ -206,13 +232,12 @@ void updateMQTT(
       pmsSensorData.PM_TOTALPARTICLES_0_3,   // Particles Per Deciliter pm0.3 reading
       pmsSensorData.PM_TOTALPARTICLES_0_5,   // Particles Per Deciliter pm0.5 reading
       pmsSensorData.PM_TOTALPARTICLES_1_0,   // Particles Per Deciliter pm1.0 reading
-      pmsSensorData.PM_TOTALPARTICLES_2_5,   // Particles Per Deciliter pm2.5 reading
-      pmsSensorData.PM_TOTALPARTICLES_5_0,   // Particles Per Deciliter pm5.0 reading
-      pmsSensorData.PM_TOTALPARTICLES_10_0   // Particles Per Deciliter pm10.0 reading
+      pmsSensorData.PM_TOTALPARTICLES_2_5    // Particles Per Deciliter pm2.5 reading
     );
 
-    // post to mqtt
-    client.publish(mqttTopic, mqttMessageBuffer);
+    Serial.print("MQTT PMS message: ");
+    Serial.println(mqttPMSMessageBuffer);
+    client.publish(mqttPMSTopic, mqttPMSMessageBuffer);
 }
 
 bool pmsTimeForReading(uint64_t timeNow) {
@@ -227,6 +252,7 @@ bool pmsAwake(uint64_t timeNow) {
 void readPMS() {
   uint64_t timeNow = millis();
   if (pmsCurrentState == PMS_ASLEEP && pmsTimeForReading(timeNow)) {
+
     pms.wakeUp();
     pmsCurrentState = PMS_WAKING;
     pmsTimeLastRead = timeNow;
@@ -257,16 +283,17 @@ String makeBMEOutput(
   sprintf(humStr, "Hum: %02.02f%%", humidityEvent.relative_humidity);
   sprintf(pressStr, "hPa: %02.02f", pressureEvent.pressure);
   sprintf(allStr, "%s\n%s\n%s\n", tempStr, humStr, pressStr);
-   
+
   return allStr;
 }
 
 String makePMSOutput() {
   if (! pmsReadingTaken) {
-    return "";
+    return "Warming up AQI...";
   }
-  char pmsStr[8];
-  sprintf(pmsStr, "PM2.5: %d", pmsData.PM_AE_UG_2_5);
+
+  char pmsStr[16];
+  sprintf(pmsStr, "PM2.5: %i", pmsData.PM_AE_UG_2_5);
   return pmsStr;
 }
 
@@ -314,6 +341,6 @@ void loop() {
 
   updateMQTT(tempEvent, pressureEvent, humidityEvent, pmsData);
   render(output);
- 
+
   delay(1000);
 }
