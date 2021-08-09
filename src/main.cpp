@@ -253,22 +253,41 @@ void readPMS() {
   uint64_t timeNow = millis();
   if (pmsCurrentState == PMS_ASLEEP && pmsTimeForReading(timeNow)) {
 
+    Serial.print("Waking PMS5002...");
     pms.wakeUp();
     pmsCurrentState = PMS_WAKING;
     pmsTimeLastRead = timeNow;
-    Serial.println("Waking PMS5003...");
+
+    Serial.print("DONE!");
+    Serial.print("(time: ");
+    Serial.print(timeNow);
+    Serial.println(")");
   }
 
   if (pmsCurrentState == PMS_WAKING && pmsAwake(timeNow)) {
+    Serial.print("PMS5002 is ready...");
+
     pmsCurrentState = PMS_READY;
+
+    Serial.print("DONE!");
+    Serial.print("(time: ");
+    Serial.print(timeNow);
+    Serial.println(")");
   }
 
   if (pmsCurrentState == PMS_READY) {
+    Serial.print("Reading PMS5002...");
+
     pms.readUntil(pmsData);
     pms.sleep();
     pmsReadingTaken = true;
     pmsCurrentState = PMS_ASLEEP;
+    pmsTimeLastRead = timeNow;
 
+    Serial.print("DONE!");
+    Serial.print("(time: ");
+    Serial.print(timeNow);
+    Serial.println(")");
     Serial.println(pmsData.PM_AE_UG_2_5);
   }
 }
